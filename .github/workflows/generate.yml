@@ -1,0 +1,62 @@
+name: Generate DevOps Project
+
+on:
+  schedule:
+    # Tues & Thurs at 14:00 UTC = 2 projects/week
+    - cron: '0 14 * * 2,4'
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Force a specific topic slug (leave blank for random)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run (no GitHub repos created)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout generator repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run generator
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_USERNAME: ${{ secrets.GH_USERNAME }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.topic }}" ]; then
+            ARGS="$ARGS --topic ${{ github.event.inputs.topic }}"
+          fi
+          python main.py $ARGS
+
+      - name: Commit updated history.json
+        if: github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "DevOps Generator Bot"
+          git config user.email "devops-bot@github-actions.com"
+          git add history.json run_log.jsonl || true
+          git diff --staged --quiet && exit 0
+          git commit -m "chore: update history after project generation"
+          git push
