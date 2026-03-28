@@ -1,5 +1,5 @@
 {
-  "model": "gemini-2.5-flash-lite-preview-06-17",
+  "model": "gemini-2.5-flash",
   "projects_per_week": 2,
   "commit_delay_range": [60, 150],
   "max_repair_attempts": 3,
