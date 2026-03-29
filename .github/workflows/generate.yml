@@ -3,7 +3,7 @@ name: Generate DevOps Project
 on:
   schedule:
     # Tues & Thurs at 14:00 UTC = 2 projects/week
-    - cron: '0 14 * * 2,4'
+    - cron: '0 14 1/3 * *'
   workflow_dispatch:
     inputs:
       topic:
