@@ -224,3 +224,49 @@ def generate_all_assets(topic: dict) -> dict[str, str]:
         time.sleep(API_CALL_DELAY)
 
     return all_files
+
+def review_readme(files: dict[str, str], topic: dict) -> dict[str, str]:
+    """
+    Ask Gemini to review the README and return an improved version if incomplete.
+    """
+    readme_content = files.get("README.md", "")
+    if not readme_content:
+        print("  ⚠ No README.md found to review.")
+        return files
+
+    prompt = f"""You are reviewing a README.md for a junior DevOps learning project.
+
+Project: {topic['slug']}
+Description: {topic['description']}
+
+Current README.md:
+{readme_content}
+
+Check if the README contains ALL of these sections:
+1. What this project does
+2. What you will learn
+3. Prerequisites with install commands
+4. Project structure (file tree)
+5. How to run it (numbered steps with exact commands)
+6. How it works
+7. Verify it's working
+8. Common issues (table)
+9. Next steps
+
+If any section is missing or too thin (less than 2-3 sentences), rewrite the full README with all sections properly filled in.
+If it's already complete, return it unchanged.
+
+Wrap in this exact format — no other text:
+```filename:README.md
+<full README content>
+```
+"""
+    print("  → Reviewing README completeness...", flush=True)
+    raw = call_gemini(prompt)
+    parsed = parse_files(raw)
+    if parsed.get("README.md"):
+        files["README.md"] = parsed["README.md"]
+        print("  ✔ README reviewed and updated.")
+    time.sleep(API_CALL_DELAY)
+    return files
+    
