@@ -89,32 +89,19 @@ def repair_loop(
     work_dir: str,
     max_retries: int = MAX_RETRIES,
 ) -> bool:
-    """
-    Main self-repair loop.
-
-    1. Wait for the current CI run to complete.
-    2. If it passes → done.
-    3. If it fails → extract logs, ask Gemini for a fix, push, repeat.
-    4. After max_retries failures → log and leave the repo as-is.
-
-    Returns True if pipeline eventually passes, False if exhausted.
-    """
     for attempt in range(1, max_retries + 1):
         print(f"\n  🔄 Repair attempt {attempt}/{max_retries}...")
 
-        # Wait for CI to complete (or time out)
         try:
             run = wait_for_workflow(owner, repo_name)
         except TimeoutError as e:
             print(f"  ⚠ {e}")
-            print("  Treating as failure and attempting repair anyway.")
             run = {"conclusion": "failure", "id": None}
 
         if run["conclusion"] == "success":
             print(f"  ✅ Pipeline passed on attempt {attempt}!")
             return True
 
-        # Failure — retrieve logs
         run_id = run.get("id")
         if run_id:
             error_log = get_error_logs(owner, repo_name, run_id)
@@ -123,12 +110,10 @@ def repair_loop(
 
         print(f"  📋 Error log snippet:\n{error_log[:800]}\n  ...")
 
-        # Build repair prompt with optional IaC syntax hint
         syntax_hint = get_syntax_hint(topic["slug"])
         hint_block = (
             f"\n\nIMPORTANT — follow these syntax rules exactly:\n{syntax_hint}"
-            if syntax_hint
-            else ""
+            if syntax_hint else ""
         )
 
         repair_prompt = f"""The GitHub Actions CI pipeline for this project failed.
@@ -143,10 +128,12 @@ Current project files:
 {format_files_for_prompt(files)}
 {hint_block}
 
-Diagnose the root cause of the CI failure and provide ONLY the corrected files
-that need to change. Do not change files that are already correct.
+Diagnose the root cause and provide ONLY the corrected files that need to change.
 
-Wrap each corrected file in this exact format — no other text:
+At the very top of your response, before any files, write one line in this exact format:
+FIX: <short description of what you are fixing, max 50 chars>
+
+Then wrap each corrected file in this exact format:
 ```filename:path/to/file.ext
 <corrected content>
 ```
@@ -154,26 +141,39 @@ Wrap each corrected file in this exact format — no other text:
 
         print(f"  → Asking Gemini for a fix...", flush=True)
         raw_patch = call_gemini(repair_prompt)
+
+        # Extract the commit message from the FIX: line
+        commit_message = f"fix: repair attempt {attempt}"
+        for line in raw_patch.splitlines():
+            if line.startswith("FIX:"):
+                description = line[4:].strip()[:50].lower()
+                commit_message = f"fix: {description}"
+                break
+
         patched_files = parse_files(raw_patch)
 
         if not patched_files:
-            print("  ⚠ Gemini returned no parseable files — skipping this repair attempt.")
+            print("  ⚠ Gemini returned no parseable files — skipping.")
             Path(f"debug_repair_{attempt}.txt").write_text(raw_patch, encoding="utf-8")
             time.sleep(API_CALL_DELAY)
             continue
 
         print(f"  → Applying patch: {list(patched_files.keys())}")
+        print(f"  → Commit message: {commit_message}")
         files.update(patched_files)
 
         commit_and_push_patch(
             repo_name=repo_name,
             patched_files=patched_files,
-            commit_message=f"fix: repair attempt {attempt}",
+            commit_message=commit_message,
             work_dir=work_dir,
         )
 
-        # Throttle before next poll cycle / LLM call
         time.sleep(API_CALL_DELAY)
+
+    print(f"\n  ❌ Pipeline still broken after {max_retries} repair attempts.")
+    print(f"     Repo left in current state: https://github.com/{owner}/{repo_name}")
+    return False
 
     # All attempts exhausted
     print(f"\n  ❌ Pipeline still broken after {max_retries} repair attempts.")
