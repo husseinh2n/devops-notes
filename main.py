@@ -87,6 +87,10 @@ def run(dry_run: bool = False, force_topic: str | None = None) -> None:
     if not files:
         print("ERROR: No files generated. Check debug_*.txt files for raw output.")
         sys.exit(1)
+        
+    # Review and complete the README before pushing
+    from generator import review_readme
+    files = review_readme(files, topic)
 
     print(f"  ✔ {len(files)} file(s) generated:")
     for f in sorted(files):
