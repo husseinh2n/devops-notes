@@ -17,8 +17,8 @@ from pathlib import Path
 _cfg_path = Path(__file__).parent / "config.json"
 _cfg = json.loads(_cfg_path.read_text()) if _cfg_path.exists() else {}
 
-MODEL = _cfg.get("model", "gemini-2.5-flash")
-FALLBACK_MODEL = _cfg.get("fallback_model", "gemini-2.5-flash-lite")
+MODEL = _cfg.get("model", "gemini-3.5-flash-lite")
+FALLBACK_MODEL = _cfg.get("fallback_model", "gemini-3.5-flash")
 API_CALL_DELAY = _cfg.get("api_call_delay", 5)  # seconds between LLM calls
 MAX_RETRIES = _cfg.get("max_retries", 5)          # total retry attempts
 RETRY_BASE_DELAY = _cfg.get("retry_base_delay", 4)  # base seconds for backoff
