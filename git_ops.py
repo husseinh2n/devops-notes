@@ -79,7 +79,15 @@ def delete_github_repo(repo_name: str) -> None:
 # ── Local git helpers ──────────────────────────────────────────────────────────
 
 def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+    try:
+        return subprocess.run(cmd, cwd=cwd, check=check, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"  ❌ Command failed: {' '.join(cmd)}")
+        if e.stdout:
+            print(f"     Stdout: {e.stdout}")
+        if e.stderr:
+            print(f"     Stderr: {e.stderr}")
+        raise
 
 
 def _write_files(base_dir: str, files: dict[str, str]) -> None:
@@ -227,7 +235,7 @@ def staggered_commit_and_push(
 
     # Push
     print("  → Pushing to GitHub...", flush=True)
-    _run(["git", "push", "-u", "origin", "main"], cwd=work_dir)
+    _run(["git", "push", "--force", "-u", "origin", "main"], cwd=work_dir)
     print(f"  ✔ Pushed to https://github.com/{username}/{repo_name}")
 
     return work_dir
