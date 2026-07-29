@@ -17,7 +17,7 @@ from pathlib import Path
 _cfg_path = Path(__file__).parent / "config.json"
 _cfg = json.loads(_cfg_path.read_text()) if _cfg_path.exists() else {}
 
-MODEL = _cfg.get("model", "gemini-2.5-flash-lite-preview-06-17")
+MODEL = _cfg.get("model", "gemini-3.5-flash-lite-preview-06-17")
 API_CALL_DELAY = _cfg.get("api_call_delay", 5)  # seconds between LLM calls
 
 
