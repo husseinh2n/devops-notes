@@ -17,21 +17,27 @@ from pathlib import Path
 _cfg_path = Path(__file__).parent / "config.json"
 _cfg = json.loads(_cfg_path.read_text()) if _cfg_path.exists() else {}
 
-MODEL = _cfg.get("model", "gemini-3.5-flash-lite-preview-06-17")
+MODEL = _cfg.get("model", "gemini-2.5-flash")
+FALLBACK_MODEL = _cfg.get("fallback_model", "gemini-2.5-flash-lite")
 API_CALL_DELAY = _cfg.get("api_call_delay", 5)  # seconds between LLM calls
+MAX_RETRIES = _cfg.get("max_retries", 5)          # total retry attempts
+RETRY_BASE_DELAY = _cfg.get("retry_base_delay", 4)  # base seconds for backoff
+
+# HTTP status codes that are worth retrying
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
 # ── Low-level API call ─────────────────────────────────────────────────────────
 
-def call_gemini(prompt: str) -> str:
+def _make_gemini_request(prompt: str, model: str) -> str:
     """
-    Send a single prompt to Gemini and return the text response.
+    Send a single prompt to a specific Gemini model and return the text response.
     Raises on HTTP errors so the caller can handle retries.
     """
     api_key = os.environ["GEMINI_API_KEY"]
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{MODEL}:generateContent?key={api_key}"
+        f"{model}:generateContent?key={api_key}"
     )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
@@ -47,6 +53,67 @@ def call_gemini(prompt: str) -> str:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError) as e:
         raise ValueError(f"Unexpected Gemini response structure: {data}") from e
+
+
+def call_gemini(prompt: str) -> str:
+    """
+    Send a prompt to Gemini with automatic retry + exponential backoff.
+
+    Retry strategy:
+      - Retryable HTTP errors (429, 500, 502, 503, 504): retry with backoff.
+      - 404 (model not found): immediately switch to FALLBACK_MODEL and retry.
+      - Other HTTP errors: fail immediately.
+    """
+    models_to_try = [MODEL, FALLBACK_MODEL]
+    current_model = models_to_try[0]
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return _make_gemini_request(prompt, current_model)
+
+        except requests.exceptions.HTTPError as e:
+            status = e.response.status_code if e.response is not None else None
+
+            # 404 = model not found → switch to fallback immediately
+            if status == 404 and current_model != FALLBACK_MODEL:
+                print(f"     ⚠ Model '{current_model}' returned 404 — "
+                      f"switching to fallback '{FALLBACK_MODEL}'", flush=True)
+                current_model = FALLBACK_MODEL
+                time.sleep(2)
+                continue
+
+            # Retryable server/rate-limit errors → exponential backoff
+            if status in _RETRYABLE_STATUS_CODES:
+                delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+                # Cap the delay at 120 seconds
+                delay = min(delay, 120)
+                print(f"     ⚠ HTTP {status} on attempt {attempt}/{MAX_RETRIES} "
+                      f"— retrying in {delay}s...", flush=True)
+                time.sleep(delay)
+                continue
+
+            # Non-retryable error — re-raise immediately
+            raise
+
+        except requests.exceptions.ConnectionError as e:
+            # Network-level failures are also worth retrying
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            delay = min(delay, 120)
+            print(f"     ⚠ Connection error on attempt {attempt}/{MAX_RETRIES} "
+                  f"— retrying in {delay}s...", flush=True)
+            time.sleep(delay)
+            continue
+
+        except requests.exceptions.Timeout:
+            delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
+            delay = min(delay, 120)
+            print(f"     ⚠ Timeout on attempt {attempt}/{MAX_RETRIES} "
+                  f"— retrying in {delay}s...", flush=True)
+            time.sleep(delay)
+            continue
+
+    # Exhausted all retries — make one final attempt and let it raise naturally
+    return _make_gemini_request(prompt, current_model)
 
 
 # ── File block parser ──────────────────────────────────────────────────────────
